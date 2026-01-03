@@ -4,12 +4,19 @@ import pandas as pd
 import pandas_ta_classic as ta
 import time
 import os
+import sys
+import logging
+import json
+from datetime import datetime, timedelta
 
-# --- 配置区：从 GitHub Secrets 读取 ---
+# 屏蔽日志
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+# 配置
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+HISTORY_FILE = "history.json"
 
-# 监控名单
 WATCHLIST = {
     "5347.KL": {"name": "TENAGA", "target_pe": 16, "min_div": 3.5},
     "0166.KL": {"name": "INARI", "target_pe": 28, "min_div": 3.0},
@@ -20,90 +27,106 @@ WATCHLIST = {
     "UEMS.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
 }
 
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_history(history):
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f)
+
+def clean_old_messages(history):
+    """删除 7 天前的消息"""
+    now = datetime.now()
+    remaining = []
+    print("正在检查并清理 7 天前的旧消息...")
+    
+    for entry in history:
+        sent_time = datetime.fromisoformat(entry['time'])
+        if now - sent_time > timedelta(days=7):
+            # 调用删除 API
+            url = f"https://api.telegram.org/bot{TOKEN}/deleteMessage?chat_id={CHAT_ID}&message_id={entry['msg_id']}"
+            try:
+                requests.get(url, timeout=10)
+            except:
+                pass
+        else:
+            remaining.append(entry)
+    return remaining
+
 def send_telegram_msg(message):
-    if not TOKEN or not CHAT_ID:
-        print("错误: TOKEN 或 CHAT_ID 未设置")
-        return
+    if not TOKEN or not CHAT_ID: return None
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={message}"
     try:
-        requests.get(url, timeout=15)
-    except Exception as e:
-        print(f"发送 Telegram 失败: {e}")
+        res = requests.get(url, timeout=15).json()
+        if res.get("ok"):
+            return res["result"]["message_id"]
+    except:
+        pass
+    return None
 
 def get_rsi(symbol):
     try:
-        df = yf.download(symbol, period="2mo", interval="1d", progress=False)
-        if df.empty or len(df) < 15: 
-            return None
+        df = yf.download(symbol, period="2mo", interval="1d", progress=False, threads=False)
+        if df.empty or len(df) < 15: return None
         rsi_series = ta.rsi(df["Close"], length=14)
-        if rsi_series is None or rsi_series.empty:
-            return None
-        return float(rsi_series.iloc[-1])
-    except Exception as e:
-        print(f"无法计算 {symbol} 的 RSI: {e}")
-        return None
+        return float(rsi_series.iloc[-1]) if rsi_series is not None else None
+    except: return None
 
 def check_stocks():
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 开始扫描...")
-    has_alert = False
+    # 获取当前日期（大马时间）
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    print(f"[{today_str}] 开始扫描马股...")
     
+    history = load_history()
+    history = clean_old_messages(history)
+    
+    has_alert = False
     for symbol, criteria in WATCHLIST.items():
         try:
             stock = yf.Ticker(symbol)
             info = stock.info
-            if not info or 'currentPrice' not in info:
-                print(f"⚠️ 跳过 {symbol}: 无效数据")
-                continue
+            if not info or 'currentPrice' not in info: continue
             
             current_price = info.get("currentPrice")
             pe_ratio = info.get("trailingPE")
             
-            # --- 股息率计算修正逻辑 ---
             div_rate = info.get("dividendRate")
-            if div_rate and current_price:
-                # 方式A：使用 每股派息额 / 股价 (最准)
-                div_yield = (div_rate / current_price) * 100
-            else:
-                # 方式B：备用方案
-                raw_yield = info.get("dividendYield", 0)
-                div_yield = (raw_yield * 100) if raw_yield else 0
-                
-            # 如果算出来还是超过 100%，通常是因为数据已经是百分比格式了，进行归一化
-            if div_yield > 100:
-                div_yield = div_yield / 100
+            div_yield = (div_rate / current_price * 100) if div_rate else (info.get("dividendYield", 0) * 100)
+            if div_yield > 100: div_yield /= 100
 
             rsi_val = get_rsi(symbol)
             
-            # 建立提醒条件
             triggers = []
             if pe_ratio and pe_ratio <= criteria["target_pe"]:
                 triggers.append(f"✅ PE低估: {pe_ratio:.2f}")
             if div_yield >= criteria["min_div"] and criteria["min_div"] > 0:
                 triggers.append(f"💰 高股息: {div_yield:.2f}%")
-            if rsi_val is not None and rsi_val <= 30:
+            if rsi_val and rsi_val <= 30:
                 triggers.append(f"📉 RSI超卖: {rsi_val:.2f}")
 
             if triggers:
                 has_alert = True
-                # 彻底避开 f-string 内部的反斜杠错误
-                header = "🌟【马股预警】" + criteria['name'] + " (" + symbol + ")\n"
-                price_line = "股价: RM " + str(current_price) + "\n"
-                separator = "-------------------\n"
-                body = ""
-                for t in triggers:
-                    body += t + "\n"
-                footer = "-------------------\n请核实基本面后决策。"
+                # 在标题加入日期
+                header = f"📅 [{today_str}] 马股预警\n"
+                header += f"公司: {criteria['name']} ({symbol})\n"
+                price_line = f"股价: RM {current_price}\n"
+                body = "-------------------\n" + "\n".join(triggers) + "\n-------------------\n请核实。此消息7天后自动删除。"
                 
-                full_msg = header + price_line + separator + body + footer
-                send_telegram_msg(full_msg)
-                print(f"提醒已发送: {criteria['name']}")
+                msg_id = send_telegram_msg(header + price_line + body)
+                if msg_id:
+                    history.append({"msg_id": msg_id, "time": datetime.now().isoformat()})
 
-        except Exception as e:
-            print(f"❌ 处理 {symbol} 时出错: {e}")
-            continue
+        except: continue
 
-    if not has_alert:
-        print("今日无符合买入条件的股票。")
+    save_history(history)
+    print("扫描流程结束。")
 
 if __name__ == "__main__":
     check_stocks()
+    sys.exit(0)
