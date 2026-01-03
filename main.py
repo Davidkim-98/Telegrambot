@@ -19,13 +19,13 @@ HISTORY_FILE = "history.json"
 SUMMARY_FILE = "summary.json" # 新增：周报记录文件
 
 WATCHLIST = {
-    "5347.KL": {"name": "TENAGA", "target_pe": 16, "min_div": 3.5},
-    "0166.KL": {"name": "INARI", "target_pe": 28, "min_div": 3.0},
-    "0097.KL": {"name": "VITROX", "target_pe": 40, "min_div": 1.5},
-    "0022.KL": {"name": "GRENTEC", "target_pe": 32, "min_div": 1.0},
-    "0128.KL": {"name": "FRONTKN", "target_pe": 28, "min_div": 1.2},
-    "ECOWLD.KL": {"name": "ECOWLD", "target_pe": 15, "min_div": 4.5},
-    "UEMS.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
+    "5347.KL": {"name": "TENAGA", "target_pe": 14, "min_div": 4.5},  # 5年均值以上
+    "0166.KL": {"name": "INARI", "target_pe": 22, "min_div": 3.8},   # 捕捉深度回调
+    "0097.KL": {"name": "VITROX", "target_pe": 35, "min_div": 1.0},  # 极罕见的1%收益率
+    "0022.KL": {"name": "GRENTEC", "target_pe": 28, "min_div": 1.8}, # 自动化板块低点
+    "0128.KL": {"name": "FRONTKN", "target_pe": 25, "min_div": 1.5}, # 5年高股息点
+    "ECOWLD.KL": {"name": "ECOWLD", "target_pe": 12, "min_div": 5.5},# 房产股的高息吸引力
+    "UEMS.KL": {"name": "UEMS", "target_pe": 18, "min_div": 3.0}     # 捕捉估值修复前夕
 }
 
 def load_json(file_path):
