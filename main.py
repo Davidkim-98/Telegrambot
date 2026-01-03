@@ -16,8 +16,8 @@ WATCHLIST = {
     "0097.KL": {"name": "VITROX", "target_pe": 40, "min_div": 1.5},
     "0022.KL": {"name": "GRENTEC", "target_pe": 32, "min_div": 1.0},
     "0128.KL": {"name": "FRONTKN", "target_pe": 28, "min_div": 1.2},
-    "8123.KL": {"name": "ECOWLD", "target_pe": 15, "min_div": 4.5},
-    "5148.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
+    "ECOWLD.KL": {"name": "ECOWLD", "target_pe": 15, "min_div": 4.5},
+    "UEMS.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
 }
 
 def send_telegram_msg(message):
