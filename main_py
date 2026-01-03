@@ -3,13 +3,13 @@ import requests
 import pandas as pd
 import pandas_ta as ta
 import time
+import os  # 必须导入
 
-# --- 配置区 ---
-TOKEN = "你的_TELEGRAM_BOT_TOKEN"
-CHAT_ID = "你的_CHAT_ID"
+# --- 配置区：从 GitHub Secrets 读取 ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# 监控名单：增加股息率和RSI监控逻辑
-# 策略：PE低 或 股息高 或 RSI超卖(<30) 都会触发提醒
+# 监控名单
 WATCHLIST = {
     "5347.KL": {"name": "TENAGA", "target_pe": 16, "min_div": 3.5},
     "0166.KL": {"name": "INARI", "target_pe": 28, "min_div": 3.0},
@@ -17,19 +17,18 @@ WATCHLIST = {
     "0022.KL": {"name": "GRENTEC", "target_pe": 32, "min_div": 1.0},
     "0128.KL": {"name": "FRONTKN", "target_pe": 28, "min_div": 1.2},
     "8123.KL": {"name": "ECOWLD", "target_pe": 15, "min_div": 4.5},
-    "5148.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0} # UEMS通常派息少
+    "5148.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
 }
 
 def send_telegram_msg(message):
+    if not TOKEN or not CHAT_ID:
+        print("错误: TOKEN 或 CHAT_ID 未设置")
+        return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={message}"
-    try:
-        requests.get(url)
-    except Exception as e:
-        print(f"发送消息失败: {e}")
+    requests.get(url)
 
 def get_rsi(symbol):
     try:
-        # 获取最近30天的历史数据以计算14日RSI
         df = yf.download(symbol, period="1mo", interval="1d", progress=False)
         if len(df) < 15: return None
         rsi_series = ta.rsi(df["Close"], length=14)
@@ -38,50 +37,29 @@ def get_rsi(symbol):
         return None
 
 def check_stocks():
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 正在扫描马股...")
+    print(f"开始扫描...")
     for symbol, criteria in WATCHLIST.items():
         try:
             stock = yf.Ticker(symbol)
             info = stock.info
-            
-            # 获取数据
             current_price = info.get("currentPrice", 0)
             pe_ratio = info.get("trailingPE")
             div_yield = info.get("dividendYield", 0) * 100 if info.get("dividendYield") else 0
             rsi_val = get_rsi(symbol)
             
-            # 建立触发条件列表
             triggers = []
             if pe_ratio and pe_ratio <= criteria["target_pe"]:
-                triggers.append(f"✅ PE低估: {pe_ratio:.2f} (目标:{criteria['target_pe']})")
-            
+                triggers.append(f"✅ PE低估: {pe_ratio:.2f}")
             if div_yield >= criteria["min_div"] and criteria["min_div"] > 0:
-                triggers.append(f"💰 高股息: {div_yield:.2f}% (目标:>{criteria['min_div']}%)")
-            
+                triggers.append(f"💰 高股息: {div_yield:.2f}%")
             if rsi_val and rsi_val <= 30:
-                triggers.append(f"📉 RSI超卖: {rsi_val:.2f} (抄底信号)")
+                triggers.append(f"📉 RSI超卖: {rsi_val:.2f}")
 
-            # 如果满足任一条件，发送Telegram提醒
             if triggers:
-                trigger_text = "\n".join(triggers)
-                msg = (f"🌟 【马股监控提醒】 🌟\n"
-                       f"股票: {criteria['name']} ({symbol})\n"
-                       f"当前股价: RM {current_price}\n"
-                       f"-------------------\n"
-                       f"{trigger_text}\n"
-                       f"-------------------\n"
-                       f"记得查看公司财报确认基本面是否变坏！")
+                msg = f"🌟【马股提醒】{criteria['name']} ({symbol})\n股价: RM {current_price}\n" + "\n".join(triggers)
                 send_telegram_msg(msg)
-                print(f"提醒已发送: {criteria['name']}")
-
         except Exception as e:
-            print(f"无法获取 {symbol} 的数据: {e}")
+            print(f"获取 {symbol} 失败: {e}")
 
 if __name__ == "__main__":
-    # 安装必要库: pip install yfinance requests pandas pandas_ta
-    # 第一次运行先检查一次
-    check_stocks()
-    # 每天检查一次
-    while True:
-        time.sleep(86400)
-        check_stocks()
+    check_stocks() # GitHub Actions 模式下只需运行一次
