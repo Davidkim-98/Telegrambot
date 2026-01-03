@@ -1,7 +1,7 @@
 import yfinance as yf
 import requests
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta_classic as ta
 import time
 import os  # 必须导入
 
