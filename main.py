@@ -16,6 +16,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 HISTORY_FILE = "history.json"
+SUMMARY_FILE = "summary.json" # 新增：周报记录文件
 
 WATCHLIST = {
     "5347.KL": {"name": "TENAGA", "target_pe": 16, "min_div": 3.5},
@@ -27,34 +28,29 @@ WATCHLIST = {
     "UEMS.KL": {"name": "UEMS", "target_pe": 25, "min_div": 0.0}
 }
 
-def load_history():
-    if os.path.exists(HISTORY_FILE):
+def load_json(file_path):
+    if os.path.exists(file_path):
         try:
-            with open(HISTORY_FILE, 'r') as f:
+            with open(file_path, 'r') as f:
                 return json.load(f)
         except:
             return []
     return []
 
-def save_history(history):
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(history, f)
+def save_json(file_path, data):
+    with open(file_path, 'w') as f:
+        json.dump(data, f)
 
 def clean_old_messages(history):
-    """删除 7 天前的消息"""
     now = datetime.now()
     remaining = []
     print("正在检查并清理 7 天前的旧消息...")
-    
     for entry in history:
         sent_time = datetime.fromisoformat(entry['time'])
         if now - sent_time > timedelta(days=7):
-            # 调用删除 API
             url = f"https://api.telegram.org/bot{TOKEN}/deleteMessage?chat_id={CHAT_ID}&message_id={entry['msg_id']}"
-            try:
-                requests.get(url, timeout=10)
-            except:
-                pass
+            try: requests.get(url, timeout=10)
+            except: pass
         else:
             remaining.append(entry)
     return remaining
@@ -66,8 +62,7 @@ def send_telegram_msg(message):
         res = requests.get(url, timeout=15).json()
         if res.get("ok"):
             return res["result"]["message_id"]
-    except:
-        pass
+    except: pass
     return None
 
 def get_rsi(symbol):
@@ -79,14 +74,16 @@ def get_rsi(symbol):
     except: return None
 
 def check_stocks():
-    # 获取当前日期（大马时间）
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now()
+    today_str = today.strftime('%Y-%m-%d')
     print(f"[{today_str}] 开始扫描马股...")
     
-    history = load_history()
+    history = load_json(HISTORY_FILE)
     history = clean_old_messages(history)
+    weekly_summary = load_json(SUMMARY_FILE)
     
-    has_alert = False
+    has_daily_alert = False
+    
     for symbol, criteria in WATCHLIST.items():
         try:
             stock = yf.Ticker(symbol)
@@ -104,27 +101,58 @@ def check_stocks():
             
             triggers = []
             if pe_ratio and pe_ratio <= criteria["target_pe"]:
-                triggers.append(f"✅ PE低估: {pe_ratio:.2f}")
+                triggers.append(f"PE低估({pe_ratio:.2f})")
             if div_yield >= criteria["min_div"] and criteria["min_div"] > 0:
-                triggers.append(f"💰 高股息: {div_yield:.2f}%")
+                triggers.append(f"高股息({div_yield:.2f}%)")
             if rsi_val and rsi_val <= 30:
-                triggers.append(f"📉 RSI超卖: {rsi_val:.2f}")
+                triggers.append(f"RSI超卖({rsi_val:.2f})")
 
             if triggers:
-                has_alert = True
-                # 在标题加入日期
-                header = f"📅 [{today_str}] 马股预警\n"
-                header += f"公司: {criteria['name']} ({symbol})\n"
-                price_line = f"股价: RM {current_price}\n"
-                body = "-------------------\n" + "\n".join(triggers) + "\n-------------------\n请核实。此消息7天后自动删除。"
+                has_daily_alert = True
+                trigger_str = ", ".join(triggers)
+                
+                # 发送即时提醒
+                header = "📅 [" + today_str + "] 马股预警\n"
+                header += "公司: " + criteria['name'] + " (" + symbol + ")\n"
+                price_line = "股价: RM " + str(current_price) + "\n"
+                body = "-------------------\n触发: " + trigger_str + "\n-------------------\n此消息7天后自动删除。"
                 
                 msg_id = send_telegram_msg(header + price_line + body)
                 if msg_id:
                     history.append({"msg_id": msg_id, "time": datetime.now().isoformat()})
+                
+                # 记录到周报缓存
+                weekly_summary.append({
+                    "date": today_str,
+                    "name": criteria['name'],
+                    "symbol": symbol,
+                    "reason": trigger_str,
+                    "price": current_price
+                })
 
         except: continue
 
-    save_history(history)
+    # 保存消息历史
+    save_json(HISTORY_FILE, history)
+    
+    # 如果是周五 (weekday 为 4)，发送周报汇总
+    if today.weekday() == 4:
+        print("今日周五，正在生成周报汇总...")
+        if weekly_summary:
+            report_header = "📊 【本周预警汇总】 📊\n时间: " + today_str + "\n-------------------\n"
+            report_body = ""
+            # 去重：如果同一只股票一周触发多次，按日期列出
+            for item in weekly_summary:
+                report_body += "- " + item['date'] + ": " + item['name'] + " (RM " + str(item['price']) + ")\n  原因: " + item['reason'] + "\n\n"
+            
+            report_footer = "-------------------\n祝您周末愉快！本周记录已清空。"
+            send_telegram_msg(report_header + report_body + report_footer)
+            # 清空周报缓存
+            weekly_summary = []
+        else:
+            send_telegram_msg("📊 本周扫描结束，无股票触发预警。祝您周末愉快！")
+    
+    save_json(SUMMARY_FILE, weekly_summary)
     print("扫描流程结束。")
 
 if __name__ == "__main__":
