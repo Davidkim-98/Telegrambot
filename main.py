@@ -81,17 +81,19 @@ def check_stocks():
 
             if triggers:
                 has_alert = True
+                # --- 修复点：先连接字符串，避免在 f-string 中使用反斜杠 ---
+                trigger_text = "\n".join(triggers)
                 msg = (f"🌟【马股预警】{criteria['name']} ({symbol})\n"
                        f"股价: RM {current_price}\n"
                        f"-------------------\n"
-                       f"{'\n'.join(triggers)}\n"
+                       f"{trigger_text}\n"
                        f"-------------------\n"
                        f"请核实基本面后决策。")
                 send_telegram_msg(msg)
                 print(f"提醒已发送: {criteria['name']}")
 
         except Exception as e:
-            print(f"❌ 处理 {symbol} 时发生未知错误: {e}")
+            print(f"❌ 处理 {symbol} 时发生错误: {e}")
             continue
 
     if not has_alert:
