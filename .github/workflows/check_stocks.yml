@@ -41,6 +41,11 @@ jobs:
           git commit -m "Update message history [skip ci]" || true
           git push || true
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Run Crypto and REIT Monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
