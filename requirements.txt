@@ -2,4 +2,4 @@ yfinance
 requests
 pandas
 pandas_ta
-python-telegram-bot>=20.0
+python-telegram-bot>=21.0
